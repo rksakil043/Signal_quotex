@@ -3,67 +3,55 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 
-def build_signals(data):
-    data['EMA20'] = data['Close'].ewm(span=20, adjust=False).mean()
-    data['EMA50'] = data['Close'].ewm(span=50, adjust=False).mean()
-
-    delta = data['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-    rs = gain / loss
-    data['RSI'] = 100 - (100 / (1 + rs))
-
-    ema12 = data['Close'].ewm(span=12, adjust=False).mean()
-    ema26 = data['Close'].ewm(span=26, adjust=False).mean()
-    data['MACD'] = ema12 - ema26
-    data['Signal_Line'] = data['MACD'].ewm(span=9, adjust=False).mean()
-
-    conditions = []
-    for i in range(len(data)):
-        if (
-            data['EMA20'].iloc[i] > data['EMA50'].iloc[i]
-            and data['RSI'].iloc[i] < 70
-            and data['MACD'].iloc[i] > data['Signal_Line'].iloc[i]
-        ):
-            conditions.append("BUY")
-        elif (
-            data['EMA20'].iloc[i] < data['EMA50'].iloc[i]
-            and data['RSI'].iloc[i] > 30
-            and data['MACD'].iloc[i] < data['Signal_Line'].iloc[i]
-        ):
-            conditions.append("SELL")
-        else:
-            conditions.append("HOLD")
-
-    data['signal'] = conditions
-    return data
-
-st.set_page_config(page_title="Quotex Signal App", layout="wide")
+st.set_page_config(page_title="Quotex Signal App", page_icon="📊")
 
 st.title("📊 Quotex Signal App — Advanced (EMA + RSI + MACD)")
-st.write("🚨 শুধুমাত্র শিক্ষা/রিসার্চ এর উদ্দেশ্যে। কোনো গ্যারান্টি নেই।")
+st.markdown("🚨 শুধুমাত্র শিক্ষা/রিসার্চ এর উদ্দেশ্যে। কোনো গ্যারান্টি নেই।")
 
-ticker = st.text_input("টিকার:", "EURUSD=X")
-timeframe = st.selectbox("টাইমফ্রেম:", ["5m", "15m", "1h", "1d"])
-period = st.selectbox("পিরিয়ড:", ["5d", "1mo", "3mo", "6mo", "1y"])
+# --- টিকার লিস্ট ---
+tickers = {
+    "EUR/USD": "EURUSD=X",
+    "GBP/USD": "GBPUSD=X",
+    "USD/JPY": "USDJPY=X",
+    "AUD/USD": "AUDUSD=X",
+    "NZD/USD": "NZDUSD=X",
+    "USD/CAD": "USDCAD=X",
+    "USD/CHF": "USDCHF=X",
+    "Gold (XAU/USD)": "XAUUSD=X",
+    "Silver (XAG/USD)": "XAGUSD=X",
+    "Crude Oil": "CL=F",
+    "Bitcoin (BTC/USD)": "BTC-USD",
+    "Ethereum (ETH/USD)": "ETH-USD",
+}
+
+# --- Dropdown ---
+symbol = st.selectbox("টিকার সিলেক্ট করো:", options=list(tickers.keys()))
+ticker = tickers[symbol]
+
+# --- Input options ---
+timeframe = st.selectbox("টাইমফ্রেম:", ["1m", "5m", "15m", "30m", "1h"])
+period = st.selectbox("পিরিয়ড:", ["1d", "5d", "1mo", "3mo"])
 
 if st.button("🔍 সিগন্যাল জেনারেট করো"):
-    try:
-        data = yf.download(ticker, period=period, interval=timeframe)
-        if data.empty:
-            st.error("⚠️ ডাটা আনা যায়নি। অন্য টিকার/টাইমফ্রেম ট্রাই করো।")
-        else:
-            signals = build_signals(data)
-            st.success("✅ সিগন্যাল জেনারেট হয়েছে!")
-            st.dataframe(signals.tail(20))
+    df = yf.download(ticker, period=period, interval=timeframe)
 
-            latest_signal = signals['signal'].iloc[-1]
-            if latest_signal == "BUY":
-                st.markdown("### 📈 সর্বশেষ সিগন্যাল: **BUY**")
-            elif latest_signal == "SELL":
-                st.markdown("### 📉 সর্বশেষ সিগন্যাল: **SELL**")
-            else:
-                st.markdown("### ⏸ সর্বশেষ সিগন্যাল: **HOLD**")
+    if df.empty:
+        st.error("❌ ডাটা পাওয়া যায়নি, অন্য টিকার বা টাইমফ্রেম চেষ্টা করো।")
+    else:
+        # Indicator calculations
+        df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
+        df["EMA50"] = df["Close"].ewm(span=50, adjust=False).mean()
+        df["RSI"] = 100 - (100 / (1 + df["Close"].pct_change().rolling(14).mean()))
+        df["MACD"] = df["Close"].ewm(span=12, adjust=False).mean() - df["Close"].ewm(span=26, adjust=False).mean()
 
-    except Exception as e:
-        st.error(f"Error: {e}")
+        last = df.iloc[-1]
+
+        signal = "❌ No Clear Signal"
+        if last["EMA20"] > last["EMA50"] and last["RSI"] < 70 and last["MACD"] > 0:
+            signal = "🟢 BUY"
+        elif last["EMA20"] < last["EMA50"] and last["RSI"] > 30 and last["MACD"] < 0:
+            signal = "🔴 SELL"
+
+        st.subheader(f"Signal for {symbol} ({ticker})")
+        st.write(signal)
+        st.line_chart(df[["Close", "EMA20", "EMA50"]])
